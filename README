@@ -1,0 +1,22 @@
+WRF-GoogleEarth repository
+
+Authors:
+Jonathan Beezley  University of CO, Denver
+Lin Zhang         University of UT, SLC
+
+This repository contains scripts for creating KMZ files from WRF output files
+as well as classes that can be extended for customizing the output.  A description
+of the code can be found at http://www.openwfm.org/wiki/Visualization_in_Google_Earth.
+The main script, nc2kmz.py, generates a file called fire.kmz, which when opened
+in Google Earth shows the heat flux coming from the fire as a ground overlay.  This
+script will not work on idealized simulations because they cannot be geolocated.
+The script take one argument, the output NetCDF file,
+
+python nc2kmz.py <wrfout>
+
+Python modules required:
+  matplotlib
+  netCDF4  or  Scientific
+
+
+
