@@ -29,8 +29,7 @@ Modified by Lin Zhang
 Date: Dec 20, 2010
 '''
 
-import matplotlib
-matplotlib.use('Agg')
+
 from matplotlib import pylab
 import numpy as np
 try:
@@ -41,9 +40,12 @@ import cStringIO
 from datetime import datetime
 import zipfile
 import shutil,os
+import warnings
+warnings.simplefilter('ignore')
 
-global openfile
-openfile=None
+class ZeroArray(Exception):
+    pass
+
 class ncEarth(object):
     
     '''Base class for reading NetCDF files and writing kml for Google Earth.'''
@@ -87,7 +89,7 @@ class ncEarth(object):
     kmlimage= \
     '''<GroundOverlay>
       <name>%(name)s</name>
-      <color>8fffffff</color>
+      <color>%(alpha)02xffffff</color>
       <Icon>
         <href>%(filename)s</href>
         <viewBoundScale>0.75</viewBoundScale>
@@ -118,10 +120,8 @@ class ncEarth(object):
         '''Class constructor:
            filename : string NetCDF file to read
            hsize : optional, width of output images in inches'''
-        global openfile
-        if not openfile:
-            openfile=Dataset(filename,'r')
-        self.f=openfile
+        
+        self.f=Dataset(filename,'r')
         self.hsize=hsize
     
     def get_bounds(self):
@@ -148,13 +148,14 @@ class ncEarth(object):
         fig=pylab.figure(figsize=(self.hsize,self.hsize*float(v.shape[0])/v.shape[1]))
         ax=fig.add_axes([0,0,1,1])
         
-        pylab.imshow(self.view_function(v))
+        cmap=pylab.cm.jet
+        cmap.set_bad('w',0.)
+        pylab.imshow(self.view_function(v),cmap=cmap)
         pylab.axis('off')
         self.process_image()
         
         # create a string buffer to save the file
         im=cStringIO.StringIO()
-        
         pylab.savefig(im,format='png',transparent=True)
         
         # return the buffer
@@ -166,13 +167,13 @@ class ncEarth(object):
         '''Do anything to the current figure window before saving it as an image.'''
         pass
     
-    def get_kml_dict(self,name,filename):
+    def get_kml_dict(self,name,filename,alpha=143):
         '''returns a dictionary of relevant info the create the image
         portion of the kml file'''
         
         lon1,lon2,lat1,lat2=self.get_bounds()
         d={'lat1':lat1,'lat2':lat2,'lon1':lon1,'lon2':lon2, \
-           'name':name,'filename':filename,'time':self.get_time()}
+           'name':name,'filename':filename,'time':self.get_time(),'alpha':alpha}
         return d
     
     def get_time(self):
@@ -271,12 +272,18 @@ class ncWRFFire(ncEarth):
         we need to reproject the data to a regular lat/lon grid.  This can be done
         with matplotlib's BaseMap module, but is not done here.'''
         
-        lat=self.f.variables['XLAT']
-        lon=self.f.variables['XLONG']
-        lat1=np.min(lat)
-        lat2=np.max(lat)
-        lon1=np.min(lon)
-        lon2=np.max(lon)
+        lat=self.f.variables['XLAT'][0,:,:].squeeze()
+        lon=self.f.variables['XLONG'][0,:,:].squeeze()
+        dx=lon[0,1]-lon[0,0]
+        dy=lat[1,0]-lat[0,0]
+        #lat1=np.min(lat)-dy/2.
+        #lat2=np.max(lat)+dy/2
+        #lon1=np.min(lon)-dx/2.
+        #lon2=np.max(lon)+dx/2
+        lat1=lat[0,0]-dy/2.
+        lat2=lat[-1,0]+dy/2.
+        lon1=lon[0,0]-dx/2.
+        lon2=lon[0,-1]+dx/2.
         return (lon1,lon2,lat1,lat2)
     
     def get_array(self,vname):
@@ -307,7 +314,12 @@ class ncWRFFire(ncEarth):
         return time
     
     def view_function(self,v):
-        return pylab.log(v)
+	if np.abs(v).max() == 0.:
+            raise ZeroArray()
+        v=np.ma.masked_equal(v,0.,copy=False)
+        v.fill_value=np.nan
+        v=np.log(v)
+        return v
 
 class ncWRFFire_mov(object):
     
@@ -385,11 +397,15 @@ class ncWRFFire_mov(object):
         # loop through all time slices and create the image data
         # appending to the kml content string for each image
         for i in xrange(0,self.nstep,1):
-            print i
-            kml=ncWRFFire(self.filename,istep=i,hsize=hsize)
-            img=vstr % (vname,i)
-            imgs.append(img)
-            content.append(kml.image2kml(vname,img))
+            kml=ncWRFFire(self.filename,istep=i)
+            try:
+                img=vstr % (vname,i)
+                content.append(kml.image2kml(vname,img))
+                imgs.append(img)
+                print 'creating frame %i of %i' % (i,self.nstep)
+            except ZeroArray:
+                print 'skipping frame %i of %i' % (i,self.nstep)
+                pass
         
         # create the main kml file
         kml=ncWRFFire.kmlstr % \
