@@ -29,7 +29,8 @@ Modified by Lin Zhang
 Date: Dec 20, 2010
 '''
 
-
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import pylab
 import numpy as np
 try:
@@ -41,6 +42,8 @@ from datetime import datetime
 import zipfile
 import shutil,os
 
+global openfile
+openfile=None
 class ncEarth(object):
     
     '''Base class for reading NetCDF files and writing kml for Google Earth.'''
@@ -115,8 +118,10 @@ class ncEarth(object):
         '''Class constructor:
            filename : string NetCDF file to read
            hsize : optional, width of output images in inches'''
-        
-        self.f=Dataset(filename,'r')
+        global openfile
+        if not openfile:
+            openfile=Dataset(filename,'r')
+        self.f=openfile
         self.hsize=hsize
     
     def get_bounds(self):
@@ -153,7 +158,9 @@ class ncEarth(object):
         pylab.savefig(im,format='png',transparent=True)
         
         # return the buffer
-        return im.getvalue()
+        s=im.getvalue()
+        im.close()
+        return s
     
     def process_image(self):
         '''Do anything to the current figure window before saving it as an image.'''
@@ -345,6 +352,7 @@ class ncWRFFire_mov(object):
             img=vstr % (vname,i)
             imgs.append(img)
             content.append(kml.image2kmlStatic(vname,img))
+            kml.f.close()
         
         # create the main kml file
         kml=ncWRFFire.kmlstr % \
@@ -358,7 +366,7 @@ class ncWRFFire_mov(object):
             z.write(img)
         z.close()
 
-    def write(self,vname,kmz='fire.kmz'):
+    def write(self,vname,kmz='fire.kmz',hsize=5):
         '''Create a kmz file from multiple time steps of a wrfout file.
         vname : the variable name to visualize
         kmz : optional, the name of the file to save the kmz to'''
@@ -378,7 +386,7 @@ class ncWRFFire_mov(object):
         # appending to the kml content string for each image
         for i in xrange(0,self.nstep,1):
             print i
-            kml=ncWRFFire(self.filename,istep=i)
+            kml=ncWRFFire(self.filename,istep=i,hsize=hsize)
             img=vstr % (vname,i)
             imgs.append(img)
             content.append(kml.image2kml(vname,img))
@@ -397,10 +405,15 @@ class ncWRFFire_mov(object):
 
 if __name__ == '__main__':
     import sys
-    if len(sys.argv) != 2:
+    if len(sys.argv) < 2:
         print "Takes a WRF-Fire output file and writes fire.kmz."
         print "usage: %s filename"%sys.argv[0]
     else:
         filename=sys.argv[1]
+        if len(sys.argv) == 2:
+            vars=('FGRNHFX',)
+        else:
+            vars=sys.argv[2:]
         kmz=ncWRFFire_mov(filename)
-        kmz.write('FGRNHFX')
+        for v in vars:
+            kmz.write(v,hsize=8,kmz='fire_'+v+'.kmz')
