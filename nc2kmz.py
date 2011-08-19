@@ -33,6 +33,7 @@ Date: Dec 20, 2010
 from matplotlib import pylab
 from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import LogNorm,Normalize
+from matplotlib.ticker import LogFormatter
 import numpy as np
 try:
     from netCDF4 import Dataset
@@ -107,6 +108,21 @@ class ncEarth(object):
       </LatLonBox>
       %(time)s
     </GroundOverlay>'''
+
+    kmlcolorbar= \
+    '''
+<ScreenOverlay>
+   <name>%(name)s colorbar</name>
+   <color>ffffffff</color>
+   <Icon>
+      <href>%(file)s</href>
+   </Icon>
+   <overlayXY x=".15" y=".5" xunits="fraction" yunits="fraction"/>
+   <screenXY x="0" y=".5" xunits="fraction" yunits="fraction"/>
+   <rotationXY x="0" y="0" xunits="fraction" yunits="fraction"/>
+   <size x="0" y=".75" xunits="fraction" yunits="fraction"/>
+</ScreenOverlay> 
+    '''
     
     # time interval specification for animated output
     timestr=\
@@ -174,7 +190,7 @@ class ncEarth(object):
         im.close()
         return s
 
-    def get_colorbar(self,min,max):
+    def get_colorbar(self,title,label,min,max):
         '''Create a colorbar from given data.  Returns a png image as a string.'''
         
         fig=pylab.figure(figsize=(2,5))
@@ -182,11 +198,15 @@ class ncEarth(object):
         norm=self.get_norm(min,max)
         formatter=self.get_formatter()
         if formatter:
-            cb1 = ColorbarBase(ax1,norm=norm,format=formatter,spacing='proportional',orientation='vertical')
+            cb1 = ColorbarBase(ax,norm=norm,format=formatter,spacing='proportional',orientation='vertical')
         else:
-            cb1 = ColorbarBase(ax1,norm=norm,spacing='proportional',orientation='vertical')
+            cb1 = ColorbarBase(ax,norm=norm,spacing='proportional',orientation='vertical')
+        cb1.set_label(label,color='1')
+        ax.set_title(title,color='1')
+        for tl in ax.get_yticklabels():
+            tl.set_color('1')
         im=cStringIO.StringIO()
-        pylab.savefig(im,format='png',transparent=True)
+        pylab.savefig(im,dpi=300,format='png',transparent=True)
         s=im.getvalue()
         im.close()
         return s
@@ -252,6 +272,21 @@ class ncEarth(object):
         pylab.close('all')
         return self.__class__.kmlimage % d
     
+    def colorbar2kml(self,varname,filename=None):
+        min,max=self.get_minmax(varname)
+        label=self.get_label(varname)
+        cdata=self.get_colorbar(varname,label,min,max)
+        if filename is None:
+            filename='colorbar_%s.png' % varname
+        f=open(filename,'w')
+        f.write(cdata)
+        f.close()
+        pylab.close('all')
+        return self.__class__.kmlcolorbar % {'name':varname,'file':filename}
+
+    def get_label(self,varname):
+        return ''
+    
     def write_kml(self,varnames):
         '''Create the actual kml file for a list of variables by calling image2kml
         for each variable in a list of variable names.'''
@@ -259,7 +294,9 @@ class ncEarth(object):
             varnames=(varnames,)
         content=[]
         for varname in varnames:
+            label=self.get_label(varname)
             content.append(self.image2kml(varname))
+            content.append(self.colorbar2kml(varname))
         kml=self.__class__.kmlstr % \
                      {'content':'\n'.join(content),\
                       'prog':self.__class__.progname}
@@ -279,7 +316,7 @@ class ncEarth_log(ncEarth):
     def get_norm(self,min,max):
         return LogNorm(min,max)
 
-    def get_formattor(self):
+    def get_formatter(self):
         return LogFormatter(10,labelOnlyBase=False)
 
     def get_minmax(self,vname):
@@ -383,6 +420,10 @@ class ncWRFFireBase(object):
             time=ncEarth.timestr % {'begin':start,'end':end}
         return time
 
+    def get_label(self,varname):
+        v=self.f.variables[varname]
+        return v.units
+
 class ncWRFFire(ncWRFFireBase,ncEarth):
     pass
 
@@ -478,6 +519,10 @@ class ncWRFFire_mov(object):
                 print 'skipping frame %i of %i' % (i,self.nstep)
                 pass
         
+        img='files/colorbar_%s.png' % vname
+        content.append(kml.colorbar2kml(vname,img))
+        imgs.append(img)
+
         # create the main kml file
         kml=ncWRFFire.kmlstr % \
             {'content':'\n'.join(content),\
