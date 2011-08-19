@@ -125,6 +125,14 @@ class ncEarth(object):
         
         self.f=Dataset(filename,'r')
         self.hsize=hsize
+        self.minmax={}
+
+    def get_minmax(self,vname):
+        if self.minmax.has_key(vname):
+            return self.minmax[vname]
+        v=self.f.variables[vname][:]
+        self.minmax[vname]=(v.min(),v.max())
+        return self.minmax[vname]
     
     def get_bounds(self):
         '''Return the latitude and longitude bounds of the image.  Must be provided
@@ -143,7 +151,7 @@ class ncEarth(object):
         to show the color on a log scale.'''
         return v
     
-    def get_image(self,v):
+    def get_image(self,v,min,max):
         '''Create an image from a given data.  Returns a png image as a string.'''
                 
         # kludge to get the image to have no border
@@ -152,7 +160,8 @@ class ncEarth(object):
         
         cmap=pylab.cm.jet
         cmap.set_bad('w',0.)
-        pylab.imshow(self.view_function(v),cmap=cmap)
+        norm=self.get_norm(min,max)
+        pylab.imshow(self.view_function(v),cmap=cmap,norm=norm)
         pylab.axis('off')
         self.process_image()
         
@@ -165,12 +174,12 @@ class ncEarth(object):
         im.close()
         return s
 
-    def get_colorbar(self,v):
+    def get_colorbar(self,min,max):
         '''Create a colorbar from given data.  Returns a png image as a string.'''
         
         fig=pylab.figure(figsize=(2,5))
         ax=fig.add_axes([0.35,0.03,0.1,0.9])
-        norm=self.get_norm(v)
+        norm=self.get_norm(min,max)
         formatter=self.get_formatter()
         if formatter:
             cb1 = ColorbarBase(ax1,norm=norm,format=formatter,spacing='proportional',orientation='vertical')
@@ -182,8 +191,8 @@ class ncEarth(object):
         im.close()
         return s
 
-    def get_norm(self,v):
-        norm=Normalize(v.min(),v.max())
+    def get_norm(self,min,max):
+        norm=Normalize(min,max)
         return norm
 
     def get_formatter(self):
@@ -214,7 +223,8 @@ class ncEarth(object):
         used to write the image can be specified, otherwise a default will be used.'''
         
         vdata=self.get_array(varname)
-        im=self.get_image(vdata)
+        min,max=self.get_minmax(varname)
+        im=self.get_image(vdata,min,max)
         if filename is None:
             filename='%s.png' % varname
         f=open(filename,'w')
@@ -231,7 +241,8 @@ class ncEarth(object):
         used to write the image can be specified, otherwise a default will be used.'''
         
         vdata=self.get_array(varname)
-        im=self.get_image(vdata)
+        min,max=self.get_minmax(varname)
+        im=self.get_image(vdata,min,max)
         if filename is None:
             filename='%s.png' % varname
         f=open(filename,'w')
@@ -265,13 +276,18 @@ class ncEarth_log(ncEarth):
         v=np.log(v)
         return v
 
-    def get_norm(self,v):
-        vmin=v[v>0].min()
-        vmax=v.max()
-        return LogNorm(vmin,vmax)
+    def get_norm(self,min,max):
+        return LogNorm(min,max)
 
     def get_formattor(self):
         return LogFormatter(10,labelOnlyBase=False)
+
+    def get_minmax(self,vname):
+        if self.minmax.has_key(vname):
+            return self.minmax[vname]
+        v=self.f.variables[vname][:]
+        self.minmax[vname]=(v[v>0].min(),v.max())
+        return self.minmax[vname]
 
 class ncEpiSimBase(object):
     '''Epidemic model file class.'''
