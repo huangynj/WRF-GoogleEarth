@@ -31,6 +31,8 @@ Date: Dec 20, 2010
 
 
 from matplotlib import pylab
+from matplotlib.colorbar import ColorbarBase
+from matplotlib.colors import LogNorm,Normalize
 import numpy as np
 try:
     from netCDF4 import Dataset
@@ -162,6 +164,30 @@ class ncEarth(object):
         s=im.getvalue()
         im.close()
         return s
+
+    def get_colorbar(self,v):
+        '''Create a colorbar from given data.  Returns a png image as a string.'''
+        
+        fig=pylab.figure(figsize=(2,5))
+        ax=fig.add_axes([0.35,0.03,0.1,0.9])
+        norm=self.get_norm(v)
+        formatter=self.get_formatter()
+        if formatter:
+            cb1 = ColorbarBase(ax1,norm=norm,format=formatter,spacing='proportional',orientation='vertical')
+        else:
+            cb1 = ColorbarBase(ax1,norm=norm,spacing='proportional',orientation='vertical')
+        im=cStringIO.StringIO()
+        pylab.savefig(im,format='png',transparent=True)
+        s=im.getvalue()
+        im.close()
+        return s
+
+    def get_norm(self,v):
+        norm=Normalize(v.min(),v.max())
+        return norm
+
+    def get_formatter(self):
+        return None
     
     def process_image(self):
         '''Do anything to the current figure window before saving it as an image.'''
@@ -230,7 +256,24 @@ class ncEarth(object):
         f.write(kml)
         f.close()
 
-class ncEpiSim(ncEarth):
+class ncEarth_log(ncEarth):
+    def view_function(self,v):
+        if np.abs(v).max() == 0.:
+            raise ZeroArray()
+        v=np.ma.masked_equal(v,0.,copy=False)
+        v.fill_value=np.nan
+        v=np.log(v)
+        return v
+
+    def get_norm(self,v):
+        vmin=v[v>0].min()
+        vmax=v.max()
+        return LogNorm(vmin,vmax)
+
+    def get_formattor(self):
+        return LogFormatter(10,labelOnlyBase=False)
+
+class ncEpiSimBase(object):
     '''Epidemic model file class.'''
     
     kmlname='epidemic.kml'
@@ -248,11 +291,10 @@ class ncEpiSim(ncEarth):
         
         return (lon1,lon2,lat1,lat2)
     
-    def view_function(self,a):
-        '''We display populations in log scale so they look better'''
-        return pylab.log(a)
+class ncEpiSim(ncEpiSimBase,ncEarth_log):
+    pass
 
-class ncWRFFire(ncEarth):
+class ncWRFFireBase(object):
     '''WRF-Fire model file class.'''
     
     kmlname='fire.kml'
@@ -286,10 +328,22 @@ class ncWRFFire(ncEarth):
         lon2=lon[0,-1]+dx/2.
         return (lon1,lon2,lat1,lat2)
     
+    def isfiregrid(self,vname):
+        xdim=self.f.variables[vname].dimensions[-1]
+        return xdim[-7:] == 'subgrid'
+
+    def srx(self):
+        return len(self.f.dimensions['west_east_subgrid'])/(len(self.f.dimensions['west_east'])+1)
+
+    def sry(self):
+        return len(self.f.dimensions['south_north_subgrid'])/(len(self.f.dimensions['south_north'])+1)
+
     def get_array(self,vname):
         '''Return a single time slice of a variable from a WRF output file.'''
         v=self.f.variables[vname]
-        v=v[self.istep,:,:]
+        v=v[self.istep,:,:].squeeze()
+        if self.isfiregrid(vname):
+            v=v[:-self.sry(),:-self.srx()]
         v=pylab.flipud(v)
         return v
     
@@ -312,14 +366,12 @@ class ncWRFFire(ncEarth):
         if start is not '' or end is not '':
             time=ncEarth.timestr % {'begin':start,'end':end}
         return time
-    
-    def view_function(self,v):
-	if np.abs(v).max() == 0.:
-            raise ZeroArray()
-        v=np.ma.masked_equal(v,0.,copy=False)
-        v.fill_value=np.nan
-        v=np.log(v)
-        return v
+
+class ncWRFFire(ncWRFFireBase,ncEarth):
+    pass
+
+class ncWRFFireLog(ncWRFFireBase,ncEarth_log):
+    pass
 
 class ncWRFFire_mov(object):
     
@@ -378,7 +430,7 @@ class ncWRFFire_mov(object):
             z.write(img)
         z.close()
 
-    def write(self,vname,kmz='fire.kmz',hsize=5):
+    def write(self,vname,kmz='fire.kmz',hsize=5,logscale=True):
         '''Create a kmz file from multiple time steps of a wrfout file.
         vname : the variable name to visualize
         kmz : optional, the name of the file to save the kmz to'''
@@ -397,7 +449,10 @@ class ncWRFFire_mov(object):
         # loop through all time slices and create the image data
         # appending to the kml content string for each image
         for i in xrange(0,self.nstep,1):
-            kml=ncWRFFire(self.filename,istep=i)
+            if logscale:
+                kml=ncWRFFireLog(self.filename,istep=i)
+            else:
+                kml=ncWRFFire(self.filename,istep=i)
             try:
                 img=vstr % (vname,i)
                 content.append(kml.image2kml(vname,img))
@@ -419,6 +474,12 @@ class ncWRFFire_mov(object):
             z.write(img)
         z.close()
 
+def uselog(vname):
+    if vname in ('FGRNHFX','GRNHFX'):
+        return True
+    else:
+        return False
+
 if __name__ == '__main__':
     import sys
     if len(sys.argv) < 2:
@@ -432,4 +493,4 @@ if __name__ == '__main__':
             vars=sys.argv[2:]
         kmz=ncWRFFire_mov(filename)
         for v in vars:
-            kmz.write(v,hsize=8,kmz='fire_'+v+'.kmz')
+            kmz.write(v,hsize=8,kmz='fire_'+v+'.kmz',logscale=uselog(v))

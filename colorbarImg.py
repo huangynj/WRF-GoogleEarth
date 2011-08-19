@@ -9,7 +9,10 @@ import colorbarImg
 colorbarImg.getImages('wrfout.nc','FGRNHFX')
 '''
 
-from Scientific.IO import NetCDF
+try:
+    from netCDF4 import Dataset
+except:
+    from Scientific.IO.NetCDF import NetCDFFile as Dataset
 import pylab
 import scipy
 from numpy import *
@@ -17,10 +20,10 @@ from matplotlib import pyplot, mpl
 from matplotlib.colors import LogNorm
 from matplotlib.colorbar import ColorbarBase
 from matplotlib.ticker import LogFormatter
-import shutil,os
+import shutil,os,sys
 
 def getImages(filename,vname):
-    file=NetCDF.NetCDFFile(filename,'r')
+    file=Dataset(filename,'r')
     vdata=file.variables[vname] 
     vsize=vdata.shape[0]
 	# create empty files subdirectory for output images
@@ -47,3 +50,6 @@ def getImages(filename,vname):
     	    cb1 = ColorbarBase(ax1,norm=norm,format=logFormatter,spacing='proportional', orientation='vertical')
 	    imgName='colorbarImages/%s.png' %imgNum
     	    fig.savefig(imgName, bbox_inches='tight')
+
+if __name__ == '__main__':
+    getImages(sys.argv[1],sys.argv[2])
