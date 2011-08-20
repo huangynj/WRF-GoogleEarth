@@ -386,10 +386,18 @@ class ncWRFFireBase(object):
         return xdim[-7:] == 'subgrid'
 
     def srx(self):
-        return len(self.f.dimensions['west_east_subgrid'])/(len(self.f.dimensions['west_east'])+1)
+        try:
+            s=len(self.f.dimensions['west_east_subgrid'])/(len(self.f.dimensions['west_east'])+1)
+        except:
+            s=(self.f.dimensions['west_east_subgrid'])/((self.f.dimensions['west_east'])+1)
+        return s
 
     def sry(self):
-        return len(self.f.dimensions['south_north_subgrid'])/(len(self.f.dimensions['south_north'])+1)
+        try:
+            s=len(self.f.dimensions['south_north_subgrid'])/(len(self.f.dimensions['south_north'])+1)
+        except:
+            s=(self.f.dimensions['south_north_subgrid'])/((self.f.dimensions['south_north'])+1)
+        return s
 
     def get_array(self,vname):
         '''Return a single time slice of a variable from a WRF output file.'''
