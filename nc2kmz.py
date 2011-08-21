@@ -58,12 +58,14 @@ except:
 
 warnings.simplefilter('ignore')
 
+global dlock
 global lock
 global queue
 global minmax
 global ncfile
 minmax={}
 lock=threading.RLock()
+dlock=threading.RLock()
 queue=threading.Semaphore(ncpu)
 ncfile={}
 
@@ -441,22 +443,32 @@ class ncWRFFireBase(object):
         if self.isfiregrid(vname):
             v=v[:-self.sry(),:-self.srx()]
         v=pylab.flipud(v)
+        if vname == 'FGRNHFX' or vname == 'GRNHFX':
+            v[:]=v*0.239005736
         return v
     
+    def get_dates(self):
+        t1=self.f.variables["Times"][0,:].tostring()
+        t2=self.f.variables["Times"][-1,:].tostring()
+        return '%s - %s' % (t1,t2)
+
     def get_time(self):
         '''Process the time information from the WRF output file to create a
         proper kml TimeInterval specification.'''
+        global dlock
         start=''
         end=''
         time=''
         g=self.f
         times=g.variables["Times"]
         if self.istep > 0:
-            start=ncEarth.beginstr % \
+            with dlock:
+                start=ncEarth.beginstr % \
                datetime.strptime(times[self.istep,:].tostring(),\
                                      self.__class__.wrftimestr).isoformat()
         if self.istep < times.shape[0]-1:
-            end=ncEarth.endstr % \
+            with dlock:
+                end=ncEarth.endstr % \
                datetime.strptime(times[self.istep+1,:].tostring(),\
                                      self.__class__.wrftimestr).isoformat()
         if start is not '' or end is not '':
