@@ -49,7 +49,23 @@ from datetime import datetime
 import zipfile
 import shutil,os
 import warnings
+import threading
+
+try:
+    ncpu=max(1,os.sysconf('SC_NPROCESSORS_ONLN'))
+except:
+    ncpu=2
+
 warnings.simplefilter('ignore')
+
+global lock
+global queue
+global minmax
+global ncfile
+minmax={}
+lock=threading.RLock()
+queue=threading.Semaphore(ncpu)
+ncfile={}
 
 class ZeroArray(Exception):
     pass
@@ -143,17 +159,27 @@ class ncEarth(object):
         '''Class constructor:
            filename : string NetCDF file to read
            hsize : optional, width of output images in inches'''
-        
-        self.f=Dataset(filename,'r')
+        global ncfile
+        global lock
+        with lock:
+            if not ncfile.has_key(filename):
+                ncfile[filename]=Dataset(filename,'r')
+        self.f=ncfile[filename]
         self.hsize=hsize
-        self.minmax={}
 
     def get_minmax(self,vname):
-        if self.minmax.has_key(vname):
-            return self.minmax[vname]
+        global minmax
+        with lock:
+            if minmax.has_key(vname):
+                mm=minmax[vname]
+            else:
+                mm=self.compute_minmax(vname)
+                minmax[vname]=mm
+        return mm
+
+    def compute_minmax(self,vname):
         v=self.f.variables[vname][:]
-        self.minmax[vname]=(v.min(),v.max())
-        return self.minmax[vname]
+        return (v.min(),v.max())
     
     def get_bounds(self):
         '''Return the latitude and longitude bounds of the image.  Must be provided
@@ -182,14 +208,15 @@ class ncEarth(object):
         cmap=pylab.cm.jet
         cmap.set_bad('w',0.)
         norm=self.get_norm(min,max)
-        pylab.imshow(self.view_function(v),cmap=cmap,norm=norm)
-        pylab.axis('off')
+        ax.imshow(self.view_function(v),cmap=cmap,norm=norm)
+        ax.axis('off')
         self.process_image()
         
         # create a string buffer to save the file
         im=cStringIO.StringIO()
-        pylab.savefig(im,format='png',transparent=True)
-        
+        fig.savefig(im,format='png',transparent=True)
+        pylab.close(fig)
+
         # return the buffer
         s=im.getvalue()
         im.close()
@@ -211,7 +238,8 @@ class ncEarth(object):
         for tl in ax.get_yticklabels():
             tl.set_color('1')
         im=cStringIO.StringIO()
-        pylab.savefig(im,dpi=300,format='png',transparent=True)
+        fig.savefig(im,dpi=300,format='png',transparent=True)
+        pylab.close(fig)
         s=im.getvalue()
         im.close()
         return s
@@ -274,7 +302,6 @@ class ncEarth(object):
         f.write(im)
         f.close()
         d=self.get_kml_dict(varname,filename)
-        pylab.close('all')
         return self.__class__.kmlimage % d
     
     def colorbar2kml(self,varname,filename=None):
@@ -324,9 +351,7 @@ class ncEarth_log(ncEarth):
     def get_formatter(self):
         return LogFormatter(10,labelOnlyBase=False)
 
-    def get_minmax(self,vname):
-        if self.minmax.has_key(vname):
-            return self.minmax[vname]
+    def compute_minmax(self,vname):
         v=self.f.variables[vname][:]
         if v[v>0].size == 0:
             min=1e-6
@@ -334,8 +359,7 @@ class ncEarth_log(ncEarth):
         else:
             min=v[v>0].min()
             max=v.max()
-        self.minmax[vname]=(min,max)
-        return self.minmax[vname]
+        return (min,max) 
 
 class ncEpiSimBase(object):
     '''Epidemic model file class.'''
@@ -449,6 +473,33 @@ class ncWRFFire(ncWRFFireBase,ncEarth):
 class ncWRFFireLog(ncWRFFireBase,ncEarth_log):
     pass
 
+def create_image(fname,istep,nstep,vname,vstr,logscale,colorbar,imgs,content):
+    global lock
+    global queue
+    queue.acquire()
+    i=istep
+    if logscale:
+        kml=ncWRFFireLog(fname,istep=istep)
+    else:
+        kml=ncWRFFire(fname,istep=istep)
+    if colorbar:
+        img='files/colorbar_%s.png' % vname
+        img_string=kml.colorbar2kml(vname,img)
+        with lock:
+            content.append(img_string)
+            imgs.append(img)
+    try:
+        img=vstr % (vname,istep)
+        img_string=kml.image2kml(vname,img)
+        with lock:
+            content.append(img_string)
+            imgs.append(img)
+            print 'creating frame %i of %i' % (i,nstep)
+    except ZeroArray:
+        with lock:
+            print 'skipping frame %i of %i' % (i,nstep)
+    queue.release()
+
 class ncWRFFire_mov(object):
     
     '''A class the uses ncWRFFire to create animations from WRF history output file.'''
@@ -513,6 +564,7 @@ class ncWRFFire_mov(object):
         
         imgs=[]     # to store a list of all images created
         content=[]  # the content of the main kml
+        threads=[]
         vstr='files/%s_%05i.png' # format specification for images (all stored in `files/' subdirectory)
         
         # create empty files subdirectory for output images
@@ -524,25 +576,13 @@ class ncWRFFire_mov(object):
         
         # loop through all time slices and create the image data
         # appending to the kml content string for each image
-        k=0
+        #k=0
         for i in xrange(0,self.nstep,1):
-            if logscale:
-                kml=ncWRFFireLog(self.filename,istep=i)
-            else:
-                kml=ncWRFFire(self.filename,istep=i)
-            try:
-                img=vstr % (vname,i)
-                content.append(kml.image2kml(vname,img))
-                imgs.append(img)
-                print 'creating frame %i of %i' % (i,self.nstep)
-                k=k+1
-            except ZeroArray:
-                print 'skipping frame %i of %i' % (i,self.nstep)
-                pass
-        if colorbar and k>0:
-            img='files/colorbar_%s.png' % vname
-            content.append(kml.colorbar2kml(vname,img))
-            imgs.append(img)
+            t=threading.Thread(target=create_image,args=(self.filename,i,self.nstep,vname,vstr,logscale,colorbar and i == 0,imgs,content))
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
 
         # create the main kml file
         kml=ncWRFFire.kmlstr % \
@@ -555,6 +595,7 @@ class ncWRFFire_mov(object):
         for img in imgs:
             z.write(img)
         z.close()
+
 
 def uselog(vname):
     if vname in ('FGRNHFX','GRNHFX'):
