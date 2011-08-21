@@ -306,7 +306,7 @@ class ncEarth(object):
 
 class ncEarth_log(ncEarth):
     def view_function(self,v):
-        if np.abs(v).max() == 0.:
+        if v.max() <= 0.:
             raise ZeroArray()
         v=np.ma.masked_equal(v,0.,copy=False)
         v.fill_value=np.nan
@@ -323,7 +323,13 @@ class ncEarth_log(ncEarth):
         if self.minmax.has_key(vname):
             return self.minmax[vname]
         v=self.f.variables[vname][:]
-        self.minmax[vname]=(v[v>0].min(),v.max())
+        if v[v>0].size == 0:
+            min=1e-6
+            max=1.
+        else:
+            min=v[v>0].min()
+            max=v.max()
+        self.minmax[vname]=(min,max)
         return self.minmax[vname]
 
 class ncEpiSimBase(object):
@@ -495,7 +501,7 @@ class ncWRFFire_mov(object):
             z.write(img)
         z.close()
 
-    def write(self,vname,kmz='fire.kmz',hsize=5,logscale=True):
+    def write(self,vname,kmz='fire.kmz',hsize=5,logscale=True,colorbar=True):
         '''Create a kmz file from multiple time steps of a wrfout file.
         vname : the variable name to visualize
         kmz : optional, the name of the file to save the kmz to'''
@@ -513,6 +519,7 @@ class ncWRFFire_mov(object):
         
         # loop through all time slices and create the image data
         # appending to the kml content string for each image
+        k=0
         for i in xrange(0,self.nstep,1):
             if logscale:
                 kml=ncWRFFireLog(self.filename,istep=i)
@@ -523,13 +530,14 @@ class ncWRFFire_mov(object):
                 content.append(kml.image2kml(vname,img))
                 imgs.append(img)
                 print 'creating frame %i of %i' % (i,self.nstep)
+                k=k+1
             except ZeroArray:
                 print 'skipping frame %i of %i' % (i,self.nstep)
                 pass
-        
-        img='files/colorbar_%s.png' % vname
-        content.append(kml.colorbar2kml(vname,img))
-        imgs.append(img)
+        if colorbar and k>0:
+            img='files/colorbar_%s.png' % vname
+            content.append(kml.colorbar2kml(vname,img))
+            imgs.append(img)
 
         # create the main kml file
         kml=ncWRFFire.kmlstr % \
