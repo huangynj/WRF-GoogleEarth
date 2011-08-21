@@ -30,6 +30,11 @@ Date: Dec 20, 2010
 '''
 
 
+import matplotlib
+try:
+    matplotlib.use('Agg')
+except:
+    pass
 from matplotlib import pylab
 from matplotlib.colorbar import ColorbarBase
 from matplotlib.colors import LogNorm,Normalize
