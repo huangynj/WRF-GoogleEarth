@@ -289,7 +289,7 @@ class ncEarth(object):
         pylab.close('all')
         return self.__class__.kmlimageStatic % d
 
-    def image2kml(self,varname,filename=None):
+    def image2kml(self,varname,filename=None,relfilename=None):
         '''Read data from the NetCDF file, create a psuedo-color image as a png,
         then create a kml string for displaying the image in Google Earth.  Returns
         the kml string describing the GroundOverlay.  Optionally, the filename
@@ -303,7 +303,9 @@ class ncEarth(object):
         f=open(filename,'w')
         f.write(im)
         f.close()
-        d=self.get_kml_dict(varname,filename)
+        if relfilename is None:
+            relfilename=filename
+        d=self.get_kml_dict(varname,relfilename)
         return self.__class__.kmlimage % d
     
     def colorbar2kml(self,varname,filename=None):
@@ -321,20 +323,28 @@ class ncEarth(object):
     def get_label(self,varname):
         return ''
     
-    def write_kml(self,varnames):
+    def write_kml(self,varnames,kmlfile=None,imgfile=None,colorbar=True):
         '''Create the actual kml file for a list of variables by calling image2kml
         for each variable in a list of variable names.'''
         if type(varnames) is str:
             varnames=(varnames,)
         content=[]
+        relfilename=imgfile
+        imgfile=os.path.join(os.path.dirname(kmlfile),imgfile)
+        imgdir=os.path.dirname(imgfile)
+        if not os.path.isdir(imgdir):
+            os.mkdir(imgdir)
         for varname in varnames:
             label=self.get_label(varname)
-            content.append(self.image2kml(varname))
-            content.append(self.colorbar2kml(varname))
+            content.append(self.image2kml(varname,filename=imgfile,relfilename=relfilename))
+            if colorbar:
+                content.append(self.colorbar2kml(varname))
         kml=self.__class__.kmlstr % \
                      {'content':'\n'.join(content),\
                       'prog':self.__class__.progname}
-        f=open(self.__class__.kmlname,'w')
+        if kmlfile is None:
+            kmlfile=self.__class__.kmlname
+        f=open(kmlfile,'w')
         f.write(kml)
         f.close()
 
