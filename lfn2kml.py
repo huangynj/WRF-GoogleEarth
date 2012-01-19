@@ -68,7 +68,7 @@ def getpts(file,nstep=-1):
     if f.variables['LFN'].shape[0] == 1:
         lfn=f.variables['LFN'][0,:,:]
     else:
-        lfn=f.variables['LFN'][n,:,:]
+        lfn=f.variables['LFN'][nstep,:,:]
     
     (fny,fnx)=lfn.shape
     nx=len(f.dimensions['west_east'])+1
@@ -79,7 +79,7 @@ def getpts(file,nstep=-1):
     lfn=lfn[:-sry,:-srx]
     
     if (lfn > 0).all():
-        sys.exit(1)
+        return None
     
     x=f.variables['FXLONG'][0,:-sry,:-srx]
     y=f.variables['FXLAT'][0,:-sry,:-srx]
@@ -93,10 +93,12 @@ def getpts(file,nstep=-1):
 
 def gettime(file,nstep=-1):
     f=Dataset(file,'r')
+    if nstep >= len(f.variables['Times']):
+        return ''
     if len(f.variables['Times']) == 1:
         t=f.variables['Times'][0].tostring()
     else:
-        t=f.variables['Times'][n].tostring()
+        t=f.variables['Times'][nstep].tostring()
     return t.replace('_','T')
 
 def createkml(poly,time,tstr):
@@ -105,7 +107,7 @@ def createkml(poly,time,tstr):
        l.append(createpoly(p,tstr))
     s='\n'.join(l)
     s=placestr % {'time':time, 'poly':s, 'timestr':tstr}
-    return kmlstr % s
+    return s #kmlstr % s
 
 def createpoly(poly,time=''):
     l=[]
@@ -114,18 +116,31 @@ def createpoly(poly,time=''):
     s='\n'.join(l)
     return polystr % s
 
-def main(file,nstep=-1):
-    time=gettime(file,nstep)
-    stime=time
-    try:
+def main(file,nstep=None):
+    last=False
+    only=True
+    s=[]
+    if nstep is None:
+        nstep=0
+        only=False
+    while not last:
+        time=gettime(file,nstep)
+        stime=time
         etime=gettime(file,nstep+1)
-    except Exception:
-        etime=stime
-    sstime=beginstr % stime
-    setime=endstr % etime
-    tstr=timestr % {'begin':sstime,'end':setime}
-    poly=getpts(file,nstep)
-    s=createkml(poly,time,tstr)
+       if etime=='':
+            etime=stime
+            last=True
+        sstime=beginstr % stime
+        setime=endstr % etime
+        tstr=timestr % {'begin':sstime,'end':setime}
+        poly=getpts(file,nstep)
+       if poly is not None:
+            s.append(createkml(poly,time,tstr))
+        nstep=nstep+1
+        if only:
+            last=True
+    s='\n'.join(s)
+    s=kmlstr % s
     f=open('fire_perimeter.kml','w')
     f.write(s)
 
@@ -149,5 +164,5 @@ if __name__ == '__main__':
     if len(sys.argv[1:]) > 1:
         n=int(sys.argv[2])
     else:
-        n=-1
+        n=None
     main(sys.argv[1],n)
