@@ -33,6 +33,7 @@ placestr= \
 '''<Placemark>
     <name>Fire perimeter at %(time)s</name>
     <styleUrl>#redLine</styleUrl>
+    %(timestr)s
     <MultiGeometry>
     %(poly)s
     </MultiGeometry>
@@ -50,6 +51,17 @@ polystr= \
         </LinearRing>
       </outerBoundaryIs>
     </Polygon>'''
+
+# time interval specification for animated output
+timestr=\
+'''<TimeSpan>
+%(begin)s
+%(end)s
+</TimeSpan>'''
+    
+beginstr='<begin>%s</begin>'
+endstr='<end>%s</end>'
+wrftimestr='%Y-%m-%d_%H:%M:%S'
 
 def getpts(file,nstep=-1):
     f=Dataset(file,'r')
@@ -85,17 +97,17 @@ def gettime(file,nstep=-1):
         t=f.variables['Times'][0].tostring()
     else:
         t=f.variables['Times'][n].tostring()
-    return t
+    return t.replace('_','T')
 
-def createkml(poly,time):
+def createkml(poly,time,tstr):
     l=[]
     for p in poly:
-       l.append(createpoly(p))
+       l.append(createpoly(p,tstr))
     s='\n'.join(l)
-    s=placestr % {'time':time, 'poly':s}
+    s=placestr % {'time':time, 'poly':s, 'timestr':tstr}
     return kmlstr % s
 
-def createpoly(poly):
+def createpoly(poly,time=''):
     l=[]
     for i in xrange(poly.shape[0]):
         l.append('%f,%f' % (poly[i,0],poly[i,1]))
@@ -104,8 +116,16 @@ def createpoly(poly):
 
 def main(file,nstep=-1):
     time=gettime(file,nstep)
+    stime=time
+    try:
+        etime=gettime(file,nstep+1)
+    except Exception:
+        etime=stime
+    sstime=beginstr % stime
+    setime=endstr % etime
+    tstr=timestr % {'begin':sstime,'end':setime}
     poly=getpts(file,nstep)
-    s=createkml(poly,time)
+    s=createkml(poly,time,tstr)
     f=open('fire_perimeter.kml','w')
     f.write(s)
 
